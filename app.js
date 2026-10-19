@@ -14,15 +14,15 @@ import { firebaseConfig, SHARED_EMAIL } from "./firebase-config.js";
 
 // ---------- settings you may want to edit ----------
 const STATUSES = [
-  { name: "Not started yet",  color: "#8d9ab3" },
-  { name: "Researching",      color: "#5aa9ff" },
-  { name: "Scripting",        color: "#a58bff" },
-  { name: "Script ready",     color: "#5cf0ff" },
-  { name: "Voiceover done",   color: "#ff7ad9" },
-  { name: "Animating",        color: "#ffa95c" },
-  { name: "Editing & review", color: "#ffe066" },
+  { name: "Not started yet",  color: "#9a9482" },
+  { name: "Researching",      color: "#6fb7ff" },
+  { name: "Scripting",        color: "#b79cff" },
+  { name: "Script ready",     color: "#4fe0c4" },
+  { name: "Voiceover done",   color: "#ff7ac6" },
+  { name: "Animating",        color: "#ff9a3c" },
+  { name: "Editing & review", color: "#fdcb06" },
   { name: "Video complete",   color: "#6dffb0" },
-  { name: "On hold",          color: "#6b7690" }
+  { name: "On hold",          color: "#6b6858" }
 ];
 const DONE_STATUS = "Video complete";          // topics with this status sink to the bottom
 const SAMPLE_CATEGORY = { id: "c-how-things-work", name: "How Things Work" };
@@ -120,14 +120,17 @@ function renderLock(msg = "") {
   current = { page: "lock" };
   if (!configured) {
     root.innerHTML = `<div class="lock"><div class="lock-card setup-note">
-      <span class="orb big"></span><h1>CURISM</h1>
-      <p class="muted">Setup needed</p>
-      <p style="text-transform:none;letter-spacing:0;font-size:14px;color:var(--text)">Open <b>firebase-config.js</b> and paste your Firebase settings, then upload it again to GitHub.</p>
+      <img class="logo big" src="logo.png" alt="Curism">
+      <img class="wordmark big" src="wordmark.png" alt="curism">
+      <p class="tagline">Setup needed</p>
+      <p style="font-size:14px;color:var(--text)">Open <b>firebase-config.js</b> and paste your Firebase settings, then upload it again to GitHub.</p>
     </div></div>`;
     return;
   }
   root.innerHTML = `<div class="lock"><form class="lock-card" id="lockForm">
-    <span class="orb big"></span><h1>CURISM</h1><p class="muted">Shorts planner</p>
+    <img class="logo big" src="logo.png" alt="Curism">
+    <img class="wordmark big" src="wordmark.png" alt="curism">
+    <p class="tagline">Shorts planner</p>
     <input class="inp" id="pw" type="password" autocomplete="current-password" placeholder="password" aria-label="Password" autofocus>
     <button class="btn primary wide" type="submit">Enter</button>
     <p class="err" id="lockErr">${esc(msg)}</p>
@@ -194,7 +197,7 @@ function route() {
   leaveTopic();
   if (!(state.topicsLoaded && state.catsLoaded)) {
     current = { page: "loading" };
-    root.innerHTML = `<div class="loading"><span class="orb big"></span><p class="muted">Loading…</p></div>`;
+    root.innerHTML = `<div class="loading"><img class="logo big" src="logo.png" alt=""><p class="muted">Loading…</p></div>`;
     return;
   }
   const m = (location.hash || "#/").match(/^#\/topic\/([^/?]+)/);
@@ -213,7 +216,7 @@ function renderHome() {
   current = { page: "home" };
   root.innerHTML = `<div class="wrap">
     <header class="top">
-      <div class="brand"><span class="orb"></span><div><h1>CURISM</h1><p>Shorts planner</p></div></div>
+      <div class="brand"><img class="logo" src="logo.png" alt="Curism logo"><div class="brand-text"><img class="wordmark" src="wordmark.png" alt="curism"><p class="tagline">Shorts planner</p></div></div>
       <div class="top-actions">
         <button class="btn primary" data-act="new">+ New topic</button>
         <button class="btn" data-act="cats">Categories</button>
@@ -506,6 +509,7 @@ function renderTopic(id) {
       <a class="btn ghost" href="#/">← All topics</a>
       <div class="top-actions">
         <span class="save-state" id="saveState"></span>
+        <button class="btn" data-act="export-pdf">Export PDF</button>
         <button class="btn danger" data-act="delete-topic">Delete</button>
         <button class="btn ghost" data-act="lock">Lock</button>
       </div>
@@ -598,6 +602,58 @@ window.addEventListener("beforeunload", e => {
   if (rowsDirty || Object.keys(headerPatch).length) { flushRows(); flushHeader(); e.preventDefault(); e.returnValue = ""; }
 });
 document.addEventListener("visibilitychange", () => { if (document.hidden && current.page === "topic") { flushRows(); flushHeader(); } });
+
+// ---- PDF export (clean white print layout -> browser "Save as PDF") ----
+function fmtDate(v) {
+  if (!v) return "";
+  const d = new Date(v + "T00:00:00");
+  return isNaN(d) ? v : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+function psValue(f, v) {
+  if (f.type === "url") { const u = safeUrl(v); return u ? `<a href="${esc(u)}">${esc(String(v).trim())}</a>` : esc(v); }
+  if (f.type === "date") return esc(fmtDate(v));
+  return esc(v);
+}
+async function exportPdf() {
+  const base = openTopic(); if (!base || !rows) return;
+  const t = { ...base, ...headerPatch };               // include anything typed but not yet saved
+  const cat = state.cats.find(c => c.id === catIdOf(t));
+  const meta = [["Status", t.status || STATUSES[0].name], ["Category", cat ? cat.name : "Uncategorized"]];
+  if (t.priority) meta.push(["Priority", t.priority]);
+  const detailRows = [
+    ...meta.map(([l, v]) => `<tr><th>${esc(l)}</th><td>${esc(v)}</td></tr>`),
+    ...FIELDS.filter(f => String(t[f.key] ?? "").trim()).map(f => `<tr><th>${esc(f.label)}</th><td>${psValue(f, t[f.key])}</td></tr>`)
+  ].join("");
+  const used = rows.filter(r => (r.line || "").trim() || (r.anim || "").trim() || (r.links || []).length);
+  const scriptRows = used.length ? used.map((r, i) => `<tr>
+      <td class="n">${i + 1}</td><td>${esc(r.line)}</td><td>${esc(r.anim)}</td>
+      <td>${(r.links || []).map(l => { const u = safeUrl(l.url); return u ? `<div class="lk"><a href="${esc(u)}">${esc(l.label || defaultLabel(u))}</a><span class="u">${esc(u)}</span></div>` : ""; }).join("")}</td>
+    </tr>`).join("") : `<tr><td colspan="4">No script rows yet.</td></tr>`;
+  const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+
+  const old = $("#printSheet"); if (old) old.remove();
+  const sheet = document.createElement("div");
+  sheet.id = "printSheet";
+  sheet.innerHTML = `
+    <div class="ps-head"><img src="logo.png" alt=""><div class="ps-brand">Curism · Shorts planner</div><div class="ps-date">Exported ${esc(today)}</div></div>
+    <h1 class="ps-title">${esc(t.name || "Untitled")}</h1>
+    <table class="ps-details"><tbody>${detailRows}</tbody></table>
+    <h2 class="ps-h2">Script</h2>
+    <table class="ps-script">
+      <thead><tr><th class="n">#</th><th>Script line</th><th>Animation description</th><th>Reference links</th></tr></thead>
+      <tbody>${scriptRows}</tbody>
+    </table>
+    <p class="ps-foot">Unmesh Khare for CURISM</p>`;
+  document.body.appendChild(sheet);
+
+  const oldTitle = document.title;
+  document.title = (String(t.name || "Script").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() || "Script");
+  const cleanup = () => { sheet.remove(); document.title = oldTitle; window.removeEventListener("afterprint", cleanup); };
+  window.addEventListener("afterprint", cleanup);
+  await Promise.all($$("img", sheet).map(i => (i.decode ? i.decode().catch(() => {}) : Promise.resolve())));
+  toast("Choose “Save as PDF” in the print window.");
+  setTimeout(() => window.print(), 120);
+}
 
 // ---- script rows ----
 function chipHTML(l, k) {
@@ -720,6 +776,7 @@ root.addEventListener("click", async e => {
       if (t) openDeleteModal(t); return;
     }
     case "delete-topic": { const t = openTopic(); if (t) openDeleteModal(t); return; }
+    case "export-pdf": await exportPdf(); return;
     case "add-row-end":
       rows.push(newRow()); renderRows(); focusRow(rows.length - 1); markRows(); return;
   }
