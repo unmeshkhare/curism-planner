@@ -299,3 +299,10 @@ tr.first-done td{border-top:1px solid rgba(109,255,176,.35)}
   .ps-script .u{display:block;font-size:7.5pt;color:#777;word-break:break-all}
   .ps-foot{margin:22px 0 0;text-align:center;font-size:8pt;letter-spacing:.25em;text-transform:uppercase;color:#999}
 }
+
+/* ---------- voiceover paragraph ---------- */
+.script-head .btn{margin-left:auto}
+.voice{margin-top:22px}
+.voice-body{padding:6px 18px 18px}
+.voice-body .inp{border-color:var(--line);font-size:15.5px;line-height:1.75;color:var(--text);cursor:text}
+.voice-actions{margin-top:12px;display:flex;gap:10px;align-items:center}

@@ -524,12 +524,20 @@ function renderTopic(id) {
     </section>
     <section class="card details">${FIELDS.map(f => `<div class="d-label">${f.label}</div><div class="d-val">${fieldInput(f)}</div>`).join("")}</section>
     <section class="card">
-      <div class="script-head"><h2>SCRIPT</h2><span class="muted" id="rowCount"></span></div>
+      <div class="script-head"><h2>SCRIPT</h2><span class="muted" id="rowCount"></span>
+        <button class="btn small" data-act="copy-voice" title="Copy all script lines as one paragraph">Copy as paragraph</button></div>
       <table class="script-table">
         <thead><tr><th>#</th><th>Script line</th><th>Animation description</th><th>Reference links</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
       <div class="script-foot"><button class="btn" data-act="add-row-end">+ Add row</button></div>
+    </section>
+    <section class="card voice">
+      <div class="script-head"><h2>VOICEOVER TEXT</h2><span class="muted" id="voiceStats"></span></div>
+      <div class="voice-body">
+        <textarea class="inp area" id="voiceText" readonly rows="3" aria-label="Script as one paragraph" placeholder="Your script lines will appear here as one paragraph, ready to copy."></textarea>
+        <div class="voice-actions"><button class="btn primary" data-act="copy-voice">Copy paragraph</button></div>
+      </div>
     </section>
     <p class="foot">Unmesh Khare for CURISM</p>
   </div>`;
@@ -684,6 +692,33 @@ function renderRows() {
   tb.innerHTML = rows.map(rowRowHTML).join("");
   $$("#rows textarea").forEach(autosize);
   const rc = $("#rowCount"); if (rc) rc.textContent = `${rows.length} row${rows.length === 1 ? "" : "s"}`;
+  updateVoice();
+}
+
+// ---- voiceover paragraph: every script line joined into one paragraph ----
+const voiceText = () => (rows || [])
+  .map(r => String(r.line || "").replace(/\s+/g, " ").trim())
+  .filter(Boolean)
+  .join(" ");
+function updateVoice() {
+  const ta = $("#voiceText"); if (!ta) return;
+  const text = voiceText();
+  ta.value = text; autosize(ta);
+  const words = text ? text.split(/\s+/).length : 0;
+  const st = $("#voiceStats");
+  if (st) st.textContent = words ? `${words} words · ${text.length} characters · ≈ ${Math.max(1, Math.round(words / 150 * 60))} sec read aloud` : "";
+}
+async function copyVoice(btn) {
+  const text = voiceText();
+  if (!text) { toast("Nothing to copy yet. Add some script lines first."); return; }
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = $("#voiceText"); ta.focus(); ta.select(); ta.setSelectionRange(0, text.length + 1);
+    try { document.execCommand("copy"); } catch { toast("Could not copy. Select the text and copy it manually."); return; }
+  }
+  toast("Script copied as one paragraph.");
+  const label = btn.textContent; btn.textContent = "Copied ✓";
+  setTimeout(() => { if (btn.isConnected) btn.textContent = label; }, 1800);
 }
 function rowOf(el) {
   const tr = el.closest("tr[data-rid]"); if (!tr) return {};
@@ -708,7 +743,7 @@ root.addEventListener("input", e => {
     scheduleHeaderSave();
   } else if (el.dataset.f && rows) {
     const { row } = rowOf(el); if (!row) return;
-    row[el.dataset.f] = el.value; autosize(el); markRows();
+    row[el.dataset.f] = el.value; autosize(el); markRows(); updateVoice();
   }
 });
 
@@ -744,6 +779,7 @@ root.addEventListener("keydown", e => {
 });
 
 root.addEventListener("click", async e => {
+  if (e.target.id === "voiceText") { e.target.select(); return; }   // click selects the whole paragraph
   const btn = e.target.closest("[data-act]");
   if (!btn) {
     // click anywhere on a topic row (outside controls) opens it
@@ -777,6 +813,7 @@ root.addEventListener("click", async e => {
     }
     case "delete-topic": { const t = openTopic(); if (t) openDeleteModal(t); return; }
     case "export-pdf": await exportPdf(); return;
+    case "copy-voice": await copyVoice(btn); return;
     case "add-row-end":
       rows.push(newRow()); renderRows(); focusRow(rows.length - 1); markRows(); return;
   }
