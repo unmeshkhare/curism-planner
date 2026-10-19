@@ -367,7 +367,7 @@ function openNewTopic() {
   const sel = $("#nt-cat", m), nc = $("#nt-newcat", m);
   sel.addEventListener("change", () => { nc.classList.toggle("hidden", sel.value !== "__new"); if (sel.value === "__new") nc.focus(); });
   $("#nt-desc", m).addEventListener("input", e => autosize(e.target));
-  setTimeout(() => $("#nt-name", m).focus(), 30);
+  $("#nt-name", m).focus();
   $("#ntForm", m).addEventListener("submit", async e => {
     e.preventDefault();
     const name = $("#nt-name", m).value.trim(); if (!name) return;
@@ -410,7 +410,7 @@ function openDeleteModal(t) {
   const check = () => { go.disabled = !(dn.value.trim().toLowerCase() === (t.name || "").trim().toLowerCase() && dp.value.length > 0); };
   dn.addEventListener("input", check); dp.addEventListener("input", check);
   dp.addEventListener("keydown", e => { if (e.key === "Enter" && !go.disabled) go.click(); });
-  setTimeout(() => dn.focus(), 30);
+  dn.focus();
   go.addEventListener("click", async () => {
     go.disabled = true; err.textContent = "";
     try {
@@ -638,6 +638,10 @@ async function exportPdf() {
       <td>${(r.links || []).map(l => { const u = safeUrl(l.url); return u ? `<div class="lk"><a href="${esc(u)}">${esc(l.label || defaultLabel(u))}</a><span class="u">${esc(u)}</span></div>` : ""; }).join("")}</td>
     </tr>`).join("") : `<tr><td colspan="4">No script rows yet.</td></tr>`;
   const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const vt = voiceText();
+  const voiceHTML = vt
+    ? `<h2 class="ps-h2">Voiceover text</h2><p class="ps-voice">${esc(vt)}</p><p class="ps-voicestat">${esc(voiceStatsText(vt))}</p>`
+    : "";
 
   const old = $("#printSheet"); if (old) old.remove();
   const sheet = document.createElement("div");
@@ -646,6 +650,7 @@ async function exportPdf() {
     <div class="ps-head"><img src="logo.png" alt=""><div class="ps-brand">Curism · Shorts planner</div><div class="ps-date">Exported ${esc(today)}</div></div>
     <h1 class="ps-title">${esc(t.name || "Untitled")}</h1>
     <table class="ps-details"><tbody>${detailRows}</tbody></table>
+    ${voiceHTML}
     <h2 class="ps-h2">Script</h2>
     <table class="ps-script">
       <thead><tr><th class="n">#</th><th>Script line</th><th>Animation description</th><th>Reference links</th></tr></thead>
@@ -700,13 +705,15 @@ const voiceText = () => (rows || [])
   .map(r => String(r.line || "").replace(/\s+/g, " ").trim())
   .filter(Boolean)
   .join(" ");
+function voiceStatsText(text) {
+  const words = text ? text.split(/\s+/).length : 0;
+  return words ? `${words} words · ${text.length} characters · ≈ ${Math.max(1, Math.round(words / 150 * 60))} sec read aloud` : "";
+}
 function updateVoice() {
   const ta = $("#voiceText"); if (!ta) return;
   const text = voiceText();
   ta.value = text; autosize(ta);
-  const words = text ? text.split(/\s+/).length : 0;
-  const st = $("#voiceStats");
-  if (st) st.textContent = words ? `${words} words · ${text.length} characters · ≈ ${Math.max(1, Math.round(words / 150 * 60))} sec read aloud` : "";
+  const st = $("#voiceStats"); if (st) st.textContent = voiceStatsText(text);
 }
 async function copyVoice(btn) {
   const text = voiceText();

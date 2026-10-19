@@ -273,11 +273,12 @@ tr.first-done td{border-top:1px solid rgba(109,255,176,.35)}
 /* ---------- PDF export (print) ---------- */
 #printSheet{display:none}
 @media print{
-  @page{size:A4;margin:14mm 13mm}
+  @page{size:A4;margin:22mm 20mm}
+  :root,html{color-scheme:light!important}
   html,body{background:#fff!important;color:#111!important;min-height:0}
   body>*:not(#printSheet){display:none!important}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact;animation:none!important}
-  #printSheet{display:block;font:400 10.5pt/1.45 Inter,Arial,Helvetica,sans-serif;color:#111}
+  #printSheet{display:block;font:400 10.5pt/1.45 Inter,Arial,Helvetica,sans-serif;color:#111;padding:0 5mm}
   #printSheet a{color:#0b57d0;text-decoration:underline;word-break:break-word}
   #printSheet table{width:100%;border-collapse:collapse}
   #printSheet th,#printSheet td{border:1px solid #bdbdbd;padding:6px 9px;vertical-align:top;text-align:left;white-space:pre-wrap;word-break:break-word}
@@ -306,3 +307,7 @@ tr.first-done td{border-top:1px solid rgba(109,255,176,.35)}
 .voice-body{padding:6px 18px 18px}
 .voice-body .inp{border-color:var(--line);font-size:15.5px;line-height:1.75;color:var(--text);cursor:text}
 .voice-actions{margin-top:12px;display:flex;gap:10px;align-items:center}
+@media print{
+  .ps-voice{margin:0;padding:10px 14px;border-left:3px solid #fdcb06;background:#fafaf7;font-size:11pt;line-height:1.75;white-space:normal;word-break:break-word}
+  .ps-voicestat{margin:5px 0 0;font-size:8.5pt;color:#888}
+}
