@@ -1,9 +1,20 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Only the signed-in shared account can read or write anything.
+
+    // The two shared accounts. Change an address here only if you also change it in Firebase > Authentication.
+    function isAdmin() {
+      return request.auth != null
+          && request.auth.token.email == 'curism-planner@example.com';
+    }
+    function isViewer() {
+      return request.auth != null
+          && request.auth.token.email == 'curism-viewer@example.com';
+    }
+
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      allow read:  if isAdmin() || isViewer();   // both passwords can look at everything
+      allow write: if isAdmin();                 // only the edit password can change or delete anything
     }
   }
 }

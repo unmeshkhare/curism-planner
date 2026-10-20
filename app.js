@@ -10,7 +10,12 @@ import {
 import {
   getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig, SHARED_EMAIL } from "./firebase-config.js";
+import * as cfg from "./firebase-config.js";
+
+const firebaseConfig = cfg.firebaseConfig;
+const SHARED_EMAIL = String(cfg.SHARED_EMAIL || "").toLowerCase();                       // admin (edit) account
+const VIEWER_EMAIL = String(cfg.VIEWER_EMAIL || "curism-viewer@example.com").toLowerCase(); // view-only account
+const CREDIT = "Made by Unmesh Khare for CURISM";
 
 // ---------- settings you may want to edit ----------
 const STATUSES = [
@@ -30,22 +35,19 @@ const PRIORITIES = ["", "Low", "Medium", "High"];
 
 // Fields shown on each topic page (after name / status / category / priority)
 const FIELDS = [
-  { key: "writer",        label: "Writer",               type: "text" },
-  { key: "week",          label: "Week",                 type: "text", ph: "e.g. 2026-43" },
-  { key: "project",       label: "Project",              type: "text", ph: "e.g. 3476 - working title" },
-  { key: "link",          label: "Link",                 type: "url" },
-  { key: "researchUrl",   label: "Research document",    type: "url" },
-  { key: "description",   label: "Description",          type: "area", ph: "Short description (shown on the front page)" },
-  { key: "writerNotes",   label: "Writer notes",         type: "area" },
-  { key: "animatorNotes", label: "Animator notes",       type: "area" },
-  { key: "animRefUrl",    label: "Animation reference",  type: "url" },
-  { key: "voiceoverUrl",  label: "Voiceover script",     type: "url" },
-  { key: "liaison",       label: "Writer liaison",       type: "text" },
-  { key: "version",       label: "Version",              type: "text", ph: "V1" },
-  { key: "publishDate",   label: "Target publish date",  type: "date" },
-  { key: "length",        label: "Estimated length",     type: "text", ph: "e.g. 45 sec" },
-  { key: "hook",          label: "Hook / title ideas",   type: "area" },
-  { key: "finalUrl",      label: "Final video link",     type: "url" }
+  { key: "writer",        label: "Writer",                type: "text" },
+  { key: "startDate",     label: "Project starting date", type: "date" },
+  { key: "project",       label: "Project",               type: "text", ph: "e.g. 3476 - working title" },
+  { key: "link",          label: "Link",                  type: "url" },
+  { key: "researchUrl",   label: "Research document",     type: "url" },
+  { key: "description",   label: "Description",           type: "area", ph: "Short description (shown on the front page)" },
+  { key: "writerNotes",   label: "Writer notes",          type: "area" },
+  { key: "animatorNotes", label: "Animator notes",        type: "area" },
+  { key: "version",       label: "Version",               type: "text", ph: "V1" },
+  { key: "publishDate",   label: "Target publish date",   type: "date" },
+  { key: "length",        label: "Estimated length",      type: "text", ph: "e.g. 45 sec" },
+  { key: "titles",        label: "Title options",         type: "titles" },
+  { key: "finalUrl",      label: "Final video link",      type: "url" }
 ];
 
 // ---------- tiny helpers ----------
@@ -104,11 +106,15 @@ if (configured) {
   auth = getAuth(fbApp);
   db = getFirestore(fbApp);
 }
+// Who is signed in? Only the admin account may change anything (Firestore rules enforce this too).
+const canEdit = () => !!(auth && auth.currentUser && String(auth.currentUser.email || "").toLowerCase() === SHARED_EMAIL);
+const ROLE_KEY = "curism.role";
+const catName = t => (state.cats.find(c => c.id === catIdOf(t)) || {}).name || "Uncategorized";
 
 function authMsg(e) {
   const c = e && e.code;
   if (["auth/invalid-credential", "auth/wrong-password", "auth/invalid-login-credentials"].includes(c)) return "Wrong password.";
-  if (c === "auth/user-not-found") return "Shared account not found. Create it in Firebase > Authentication > Users.";
+  if (c === "auth/user-not-found") return "That account was not found. Create it in Firebase > Authentication > Users.";
   if (c === "auth/too-many-requests") return "Too many attempts. Wait a few minutes and try again.";
   if (c === "auth/network-request-failed") return "No connection.";
   if (c === "auth/operation-not-allowed") return "Email/Password sign-in is not switched on in Firebase.";
@@ -127,20 +133,35 @@ function renderLock(msg = "") {
     </div></div>`;
     return;
   }
+  let role = store.get(ROLE_KEY, "viewer") === "admin" ? "admin" : "viewer";
   root.innerHTML = `<div class="lock"><form class="lock-card" id="lockForm">
     <img class="logo big" src="logo.png" alt="Curism">
     <img class="wordmark big" src="wordmark.png" alt="curism">
     <p class="tagline">Shorts planner</p>
+    <div class="seg role-seg" role="group" aria-label="Access level">
+      <button type="button" data-role="viewer" class="${role === "viewer" ? "on" : ""}">View</button>
+      <button type="button" data-role="admin" class="${role === "admin" ? "on" : ""}">Edit</button>
+    </div>
     <input class="inp" id="pw" type="password" autocomplete="current-password" placeholder="password" aria-label="Password" autofocus>
     <button class="btn primary wide" type="submit">Enter</button>
     <p class="err" id="lockErr">${esc(msg)}</p>
   </form></div>`;
+  $$("[data-role]").forEach(b => b.addEventListener("click", () => {
+    role = b.dataset.role; store.set(ROLE_KEY, role);
+    $$("[data-role]").forEach(x => x.classList.toggle("on", x === b));
+    $("#lockErr").textContent = ""; $("#pw").focus();
+  }));
   $("#lockForm").addEventListener("submit", async e => {
     e.preventDefault();
     const pw = $("#pw").value; if (!pw) return;
-    const btn = $("#lockForm button"); btn.disabled = true;
-    try { await signInWithEmailAndPassword(auth, SHARED_EMAIL, pw); }
-    catch (err) { btn.disabled = false; $("#lockErr").textContent = authMsg(err); $("#pw").select(); }
+    const btn = $("#lockForm button[type=submit]"); btn.disabled = true;
+    try { await signInWithEmailAndPassword(auth, role === "admin" ? SHARED_EMAIL : VIEWER_EMAIL, pw); }
+    catch (err) {
+      btn.disabled = false;
+      const m = authMsg(err);
+      $("#lockErr").textContent = m === "Wrong password." ? `Wrong password for ${role === "admin" ? "edit" : "view"} access.` : m;
+      $("#pw").select();
+    }
   });
 }
 
@@ -155,7 +176,7 @@ function startData() {
   unsubs.push(onSnapshot(doc(db, "meta", "categories"), snap => {
     if (!snap.exists()) {
       state.cats = [];
-      if (!snap.metadata.fromCache) setDoc(doc(db, "meta", "categories"), { list: [SAMPLE_CATEGORY] }).catch(dataError);
+      if (!snap.metadata.fromCache && canEdit()) setDoc(doc(db, "meta", "categories"), { list: [SAMPLE_CATEGORY] }).catch(dataError);
     } else state.cats = snap.data().list || [];
     state.catsLoaded = true; onData();
   }, dataError));
@@ -193,6 +214,7 @@ function onData() {
 
 // ---------- routing ----------
 function route() {
+  document.body.classList.toggle("ro", !!(auth && auth.currentUser) && !canEdit());
   if (!auth || !auth.currentUser) { renderLock(); return; }
   leaveTopic();
   if (!(state.topicsLoaded && state.catsLoaded)) {
@@ -218,8 +240,8 @@ function renderHome() {
     <header class="top">
       <div class="brand"><img class="logo" src="logo.png" alt="Curism logo"><div class="brand-text"><img class="wordmark" src="wordmark.png" alt="curism"><p class="tagline">Shorts planner</p></div></div>
       <div class="top-actions">
-        <button class="btn primary" data-act="new">+ New topic</button>
-        <button class="btn" data-act="cats">Categories</button>
+        ${canEdit() ? `<button class="btn primary" data-act="new">+ New topic</button>
+        <button class="btn" data-act="cats">Categories</button>` : `<span class="badge" title="You can view, copy, open links and export, but not change anything">View only</span>`}
         <button class="btn ghost" data-act="lock">Lock</button>
       </div>
     </header>
@@ -234,7 +256,7 @@ function renderHome() {
       <span class="muted" id="count"></span>
     </section>
     <main id="listArea"></main>
-    <p class="foot">Unmesh Khare for CURISM</p>
+    <p class="foot">${esc(CREDIT)}</p>
   </div>`;
   refreshFilters(); updateViewButtons(); renderList();
 }
@@ -267,24 +289,30 @@ function visibleTopics() {
   });
 }
 function rowHTML(t, i, items) {
+  const ed = canEdit();
   const done = isDone(t), st = statusObj(t.status);
   const prev = items[i - 1], next = items[i + 1];
   const upOff = !prev || isDone(prev) !== done;
   const downOff = !next || isDone(next) !== done;
   const firstDone = done && i > 0 && !isDone(prev);
   return `<tr data-id="${esc(t.id)}" class="${done ? "done" : ""}${firstDone ? " first-done" : ""}">
-    <td class="c-move"><span class="handle" title="Drag to reorder">⋮⋮</span><span class="arrows">
+    ${ed ? `<td class="c-move"><span class="handle" title="Drag to reorder">⋮⋮</span><span class="arrows">
       <button class="icon-btn" data-act="mv-up" ${upOff ? "disabled" : ""} title="Move up" aria-label="Move up">↑</button>
-      <button class="icon-btn" data-act="mv-down" ${downOff ? "disabled" : ""} title="Move down" aria-label="Move down">↓</button></span></td>
+      <button class="icon-btn" data-act="mv-down" ${downOff ? "disabled" : ""} title="Move down" aria-label="Move down">↓</button></span></td>` : ""}
     <td class="c-name"><a href="#/topic/${esc(t.id)}">${esc(t.name || "Untitled")}</a>${t.project ? `<div class="sub">${esc(t.project)}</div>` : ""}</td>
     <td class="c-desc">${esc(t.description || "")}</td>
-    <td class="c-cat"><select class="sel" data-act="set-cat" aria-label="Category">${catOptions(catIdOf(t))}</select></td>
-    <td class="c-status"><select class="sel status" data-act="set-status" style="--c:${st.color}" aria-label="Status">${statusOptions(t.status)}</select></td>
-    <td class="c-del"><button class="icon-btn danger" data-act="del-topic" title="Delete topic" aria-label="Delete topic">✕</button></td>
+    <td class="c-cat">${ed
+      ? `<select class="sel" data-act="set-cat" aria-label="Category">${catOptions(catIdOf(t))}</select>`
+      : `<span class="ro-text">${esc(catName(t))}</span>`}</td>
+    <td class="c-status">${ed
+      ? `<select class="sel status" data-act="set-status" style="--c:${st.color}" aria-label="Status">${statusOptions(t.status)}</select>`
+      : `<span class="pill-ro" style="--c:${st.color}">${esc(t.status || STATUSES[0].name)}</span>`}</td>
+    ${ed ? `<td class="c-del"><button class="icon-btn danger" data-act="del-topic" title="Delete topic" aria-label="Delete topic">✕</button></td>` : ""}
   </tr>`;
 }
 function tableHTML(items) {
-  return `<table class="list-table"><thead><tr><th></th><th>Topic</th><th>Description</th><th>Category</th><th>Status</th><th></th></tr></thead>
+  const ed = canEdit();
+  return `<table class="list-table"><thead><tr>${ed ? "<th></th>" : ""}<th>Topic</th><th>Description</th><th>Category</th><th>Status</th>${ed ? "<th></th>" : ""}</tr></thead>
     <tbody>${items.map((t, i) => rowHTML(t, i, items)).join("")}</tbody></table>`;
 }
 function renderList() {
@@ -293,7 +321,7 @@ function renderList() {
   const total = state.topics.length;
   $("#count").textContent = total ? `${vis.length} of ${total} topics · ${state.topics.filter(isDone).length} complete` : "";
   if (!total) {
-    area.innerHTML = `<div class="empty"><p>No topics yet.</p><button class="btn primary" data-act="new">+ Create your first topic</button></div>`;
+    area.innerHTML = `<div class="empty"><p>No topics yet.</p>${canEdit() ? `<button class="btn primary" data-act="new">+ Create your first topic</button>` : ""}</div>`;
     return;
   }
   if (!vis.length) { area.innerHTML = `<div class="empty"><p>No topics match your filters.</p></div>`; return; }
@@ -314,7 +342,7 @@ function renderList() {
       </section>`;
     }).join("");
   }
-  if (window.Sortable) {
+  if (window.Sortable && canEdit()) {
     $$("#listArea tbody").forEach(tb => window.Sortable.create(tb, {
       handle: ".handle", animation: 160, ghostClass: "drag-ghost", forceFallback: false,
       onEnd: () => applyOrder($$("tr[data-id]", tb).map(tr => tr.dataset.id))
@@ -488,11 +516,32 @@ const openTopic = () => state.topics.find(t => t.id === openTopicId);
 function setSave(text, cls = "") { const el = $("#saveState"); if (el) { el.textContent = text; el.className = "save-state " + cls; } }
 
 function fieldInput(f) {
-  const ph = f.ph ? ` placeholder="${esc(f.ph)}"` : "";
-  if (f.type === "area") return `<textarea class="inp area" rows="1" data-field="${f.key}"${ph}></textarea>`;
-  if (f.type === "date") return `<input class="inp" type="date" data-field="${f.key}">`;
-  if (f.type === "url") return `<div class="urlrow"><input class="inp" type="text" inputmode="url" data-field="${f.key}" placeholder="https://…"><a class="open" target="_blank" rel="noopener noreferrer" hidden title="Open link" aria-label="Open link">↗</a></div>`;
-  return `<input class="inp" type="text" data-field="${f.key}"${ph}>`;
+  const ed = canEdit(), ro = ed ? "" : " readonly";
+  const ph = f.ph && ed ? ` placeholder="${esc(f.ph)}"` : "";
+  if (f.type === "titles") return `<div class="titles" data-titles></div>`;
+  if (f.type === "area") return `<textarea class="inp area" rows="1" data-field="${f.key}"${ph}${ro}></textarea>`;
+  if (f.type === "date") return `<input class="inp" type="date" data-field="${f.key}"${ro}>`;
+  if (f.type === "url") return `<div class="urlrow"><input class="inp" type="text" inputmode="url" data-field="${f.key}"${ed ? ' placeholder="https://…"' : ""}${ro}><a class="open" target="_blank" rel="noopener noreferrer" hidden title="Open link" aria-label="Open link">↗</a></div>`;
+  return `<input class="inp" type="text" data-field="${f.key}"${ph}${ro}>`;
+}
+
+// ---- title options: a list you can add to / remove from ----
+const titlesOf = t => Array.isArray(t.titles)
+  ? t.titles.map(x => String(x ?? ""))
+  : (String(t.hook ?? "").trim() ? [String(t.hook).trim()] : []);     // older topics kept one "hook" text
+const collectTitles = () => $$(".title-opt").map(i => i.value.trim()).filter(Boolean);
+const titleRowHTML = v => `<div class="title-row"><input class="inp title-opt" type="text" value="${esc(v)}" placeholder="Title option" aria-label="Title option"><button class="icon-btn danger" data-act="title-rm" title="Remove this option" aria-label="Remove title option">✕</button></div>`;
+function renderTitles(t) {
+  const box = $("[data-titles]"); if (!box) return;
+  if ("titles" in headerPatch) return;                                  // your unsaved edits win
+  const ed = canEdit();
+  if (ed && box.contains(document.activeElement)) return;
+  const list = titlesOf(t).filter(x => x.trim());
+  if (!ed) {
+    box.innerHTML = list.length ? `<ol class="title-list">${list.map(x => `<li>${esc(x)}</li>`).join("")}</ol>` : `<span class="muted">—</span>`;
+    return;
+  }
+  box.innerHTML = list.map(titleRowHTML).join("") + `<button class="btn small ghost" data-act="title-add">+ Add title option</button>`;
 }
 
 function renderTopic(id) {
@@ -504,22 +553,26 @@ function renderTopic(id) {
   }
   current = { page: "topic", id }; openTopicId = id;
   rows = null; rowsDirty = false; headerPatch = {};
+  const ed = canEdit();
   root.innerHTML = `<div class="wrap">
     <header class="top">
       <a class="btn ghost" href="#/">← All topics</a>
       <div class="top-actions">
-        <span class="save-state" id="saveState"></span>
+        ${ed ? `<span class="save-state" id="saveState"></span>` : `<span class="badge" title="You can view, copy, open links and export, but not change anything">View only</span>`}
         <button class="btn" data-act="export-pdf">Export PDF</button>
-        <button class="btn danger" data-act="delete-topic">Delete</button>
+        ${ed ? `<button class="btn danger" data-act="delete-topic">Delete</button>` : ""}
         <button class="btn ghost" data-act="lock">Lock</button>
       </div>
     </header>
     <section class="titlebar">
-      <input class="inp title-input" data-field="name" placeholder="Topic name" aria-label="Topic name">
-      <div class="pills">
+      <input class="inp title-input" data-field="name" placeholder="Topic name" aria-label="Topic name"${ed ? "" : " readonly"}>
+      <div class="pills">${ed ? `
         <label>Status<select class="sel status" id="tp-status" data-act="tp-status">${statusOptions("")}</select></label>
         <label>Category<select class="sel" id="tp-cat" data-act="tp-cat"></select></label>
-        <label>Priority<select class="sel" data-field="priority">${PRIORITIES.map(p => `<option value="${p}">${p || "—"}</option>`).join("")}</select></label>
+        <label>Priority<select class="sel" data-field="priority">${PRIORITIES.map(p => `<option value="${p}">${p || "—"}</option>`).join("")}</select></label>` : `
+        <label>Status<span class="pill-ro" id="ro-status"></span></label>
+        <label>Category<span class="ro-text" id="ro-cat"></span></label>
+        <label>Priority<span class="ro-text" id="ro-pri"></span></label>`}
       </div>
     </section>
     <section class="card details">${FIELDS.map(f => `<div class="d-label">${f.label}</div><div class="d-val">${fieldInput(f)}</div>`).join("")}</section>
@@ -527,10 +580,10 @@ function renderTopic(id) {
       <div class="script-head"><h2>SCRIPT</h2><span class="muted" id="rowCount"></span>
         <button class="btn small" data-act="copy-voice" title="Copy all script lines as one paragraph">Copy as paragraph</button></div>
       <table class="script-table">
-        <thead><tr><th>#</th><th>Script line</th><th>Animation description</th><th>Reference links</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>Script line</th><th>Animation description</th><th>Reference links</th>${ed ? "<th></th>" : ""}</tr></thead>
         <tbody id="rows"></tbody>
       </table>
-      <div class="script-foot"><button class="btn" data-act="add-row-end">+ Add row</button></div>
+      ${ed ? `<div class="script-foot"><button class="btn" data-act="add-row-end">+ Add row</button></div>` : ""}
     </section>
     <section class="card voice">
       <div class="script-head"><h2>VOICEOVER TEXT</h2><span class="muted" id="voiceStats"></span></div>
@@ -539,14 +592,14 @@ function renderTopic(id) {
         <div class="voice-actions"><button class="btn primary" data-act="copy-voice">Copy paragraph</button></div>
       </div>
     </section>
-    <p class="foot">Unmesh Khare for CURISM</p>
+    <p class="foot">${esc(CREDIT)}</p>
   </div>`;
   fillHeader(t);
   scriptUnsub = onSnapshot(doc(db, "scripts", id), snap => {
     if (openTopicId !== id || snap.metadata.hasPendingWrites) return;
     const remote = snap.exists() ? (snap.data().rows || []) : [];
     if (rows === null) { rows = remote.length ? remote : [newRow()]; renderRows(); return; }
-    if (rowsDirty || (document.activeElement && document.activeElement.closest("#rows"))) return;
+    if (rowsDirty || (canEdit() && document.activeElement && document.activeElement.closest("#rows"))) return;
     if (JSON.stringify(remote) === JSON.stringify(rows)) return;
     rows = remote.length ? remote : [newRow()]; renderRows();
   }, dataError);
@@ -567,6 +620,11 @@ function fillHeader(t) {
   if (ss && ss !== active) { ss.value = t.status || STATUSES[0].name; ss.style.setProperty("--c", statusObj(t.status).color); }
   const sc = $("#tp-cat");
   if (sc && sc !== active) sc.innerHTML = catOptions(catIdOf(t));
+  // view-only pages show plain text instead of dropdowns
+  const rs = $("#ro-status"); if (rs) { rs.textContent = t.status || STATUSES[0].name; rs.style.setProperty("--c", statusObj(t.status).color); }
+  const rc = $("#ro-cat"); if (rc) rc.textContent = catName(t);
+  const rp = $("#ro-pri"); if (rp) rp.textContent = t.priority || "—";
+  renderTitles(t);
 }
 function updateOpen(el) {
   const a = el.parentElement.querySelector(".open"); if (!a) return;
@@ -630,7 +688,13 @@ async function exportPdf() {
   if (t.priority) meta.push(["Priority", t.priority]);
   const detailRows = [
     ...meta.map(([l, v]) => `<tr><th>${esc(l)}</th><td>${esc(v)}</td></tr>`),
-    ...FIELDS.filter(f => String(t[f.key] ?? "").trim()).map(f => `<tr><th>${esc(f.label)}</th><td>${psValue(f, t[f.key])}</td></tr>`)
+    ...FIELDS.map(f => {
+      if (f.type === "titles") {
+        const list = titlesOf(t).map(x => x.trim()).filter(Boolean);
+        return list.length ? `<tr><th>${esc(f.label)}</th><td><ol class="ps-titles">${list.map(x => `<li>${esc(x)}</li>`).join("")}</ol></td></tr>` : "";
+      }
+      return String(t[f.key] ?? "").trim() ? `<tr><th>${esc(f.label)}</th><td>${psValue(f, t[f.key])}</td></tr>` : "";
+    })
   ].join("");
   const used = rows.filter(r => (r.line || "").trim() || (r.anim || "").trim() || (r.links || []).length);
   const scriptRows = used.length ? used.map((r, i) => `<tr>
@@ -656,7 +720,7 @@ async function exportPdf() {
       <thead><tr><th class="n">#</th><th>Script line</th><th>Animation description</th><th>Reference links</th></tr></thead>
       <tbody>${scriptRows}</tbody>
     </table>
-    <p class="ps-foot">Unmesh Khare for CURISM</p>`;
+    <p class="ps-foot">${esc(CREDIT)}</p>`;
   document.body.appendChild(sheet);
 
   const oldTitle = document.title;
@@ -671,25 +735,27 @@ async function exportPdf() {
 // ---- script rows ----
 function chipHTML(l, k) {
   const u = safeUrl(l.url);
-  return `<span class="chip ${linkKind(u)}"><a href="${esc(u || "#")}" target="_blank" rel="noopener noreferrer" title="${esc(u)}">${esc(l.label || defaultLabel(u))}</a><button class="x" data-act="link-rm" data-i="${k}" title="Remove link" aria-label="Remove link">×</button></span>`;
+  const x = canEdit() ? `<button class="x" data-act="link-rm" data-i="${k}" title="Remove link" aria-label="Remove link">×</button>` : "";
+  return `<span class="chip ${linkKind(u)}"><a href="${esc(u || "#")}" target="_blank" rel="noopener noreferrer" title="${esc(u)}">${esc(l.label || defaultLabel(u))}</a>${x}</span>`;
 }
 function rowRowHTML(r, i) {
+  const ed = canEdit(), ro = ed ? "" : " readonly";
   return `<tr data-rid="${esc(r.id)}">
-    <td class="c-num" data-label=""><span class="num">${i + 1}</span><span class="rowtools">
+    <td class="c-num" data-label=""><span class="num">${i + 1}</span>${ed ? `<span class="rowtools">
       <button class="icon-btn" data-act="row-up" ${i === 0 ? "disabled" : ""} title="Move up" aria-label="Move row up">↑</button>
-      <button class="icon-btn" data-act="row-down" ${i === rows.length - 1 ? "disabled" : ""} title="Move down" aria-label="Move row down">↓</button></span></td>
-    <td data-label="Script line"><textarea class="inp area" data-f="line" rows="1" placeholder="Narration line…">\n${esc(r.line)}</textarea></td>
-    <td data-label="Animation description"><textarea class="inp area" data-f="anim" rows="2" placeholder="Frame-by-frame description for the animator…">\n${esc(r.anim)}</textarea></td>
+      <button class="icon-btn" data-act="row-down" ${i === rows.length - 1 ? "disabled" : ""} title="Move down" aria-label="Move row down">↓</button></span>` : ""}</td>
+    <td data-label="Script line"><textarea class="inp area" data-f="line" rows="1"${ro}${ed ? ' placeholder="Narration line…"' : ""}>\n${esc(r.line)}</textarea></td>
+    <td data-label="Animation description"><textarea class="inp area" data-f="anim" rows="2"${ro}${ed ? ' placeholder="Frame-by-frame description for the animator…"' : ""}>\n${esc(r.anim)}</textarea></td>
     <td data-label="Reference links">
       <div class="links">${(r.links || []).map(chipHTML).join("")}</div>
-      <div class="linkform" hidden>
+      ${ed ? `<div class="linkform" hidden>
         <input class="inp lf-url" type="text" inputmode="url" placeholder="Paste link (image, video, YouTube…)">
         <input class="inp lf-label" type="text" placeholder="Label (optional)">
         <div class="lf-actions"><button class="btn small primary" data-act="link-save">Add</button><button class="btn small ghost" data-act="link-cancel">Cancel</button></div>
       </div>
-      <button class="btn small ghost" data-act="link-add">+ link</button>
+      <button class="btn small ghost" data-act="link-add">+ link</button>` : ""}
     </td>
-    <td class="c-act"><button class="icon-btn" data-act="row-add" title="Insert row below" aria-label="Insert row below">＋</button><button class="icon-btn danger" data-act="row-del" title="Delete row" aria-label="Delete row">✕</button></td>
+    ${ed ? `<td class="c-act"><button class="icon-btn" data-act="row-add" title="Insert row below" aria-label="Insert row below">＋</button><button class="icon-btn danger" data-act="row-del" title="Delete row" aria-label="Delete row">✕</button></td>` : ""}
   </tr>`;
 }
 function renderRows() {
@@ -740,7 +806,8 @@ function focusRow(i) { const tr = $$("#rows tr")[i]; if (tr) { const ta = $("tex
 root.addEventListener("input", e => {
   const el = e.target;
   if (el.id === "q") { state.q = el.value; renderList(); return; }
-  if (current.page !== "topic") return;
+  if (current.page !== "topic" || !canEdit()) return;                  // view-only users can never edit
+  if (el.classList.contains("title-opt")) { headerPatch.titles = collectTitles(); scheduleHeaderSave(); return; }
   if (el.dataset.field) {
     const key = el.dataset.field;
     if (key === "name" && !el.value.trim()) return;
@@ -756,6 +823,7 @@ root.addEventListener("input", e => {
 
 root.addEventListener("change", async e => {
   const el = e.target, act = el.dataset.act; if (!act) return;
+  if (!canEdit() && ["set-status", "set-cat", "tp-status", "tp-cat"].includes(act)) return;
   try {
     if (act === "f-status") { state.fStatus = el.value; renderList(); }
     else if (act === "f-cat") { state.fCat = el.value; renderList(); }
@@ -785,6 +853,9 @@ root.addEventListener("keydown", e => {
   }
 });
 
+const EDIT_ACTS = new Set(["new", "cats", "mv-up", "mv-down", "del-topic", "delete-topic", "add-row-end",
+  "row-up", "row-down", "row-add", "row-del", "link-add", "link-cancel", "link-save", "link-rm", "title-add", "title-rm"]);
+
 root.addEventListener("click", async e => {
   if (e.target.id === "voiceText") { e.target.select(); return; }   // click selects the whole paragraph
   const btn = e.target.closest("[data-act]");
@@ -796,6 +867,7 @@ root.addEventListener("click", async e => {
   }
   const act = btn.dataset.act;
   if (btn.tagName === "SELECT" || btn.tagName === "OPTION") return;
+  if (!canEdit() && EDIT_ACTS.has(act)) return;                         // view-only users can never edit
 
   switch (act) {
     case "lock": discardPending(); leaveTopic(); await signOut(auth); return;
@@ -823,6 +895,13 @@ root.addEventListener("click", async e => {
     case "copy-voice": await copyVoice(btn); return;
     case "add-row-end":
       rows.push(newRow()); renderRows(); focusRow(rows.length - 1); markRows(); return;
+    case "title-add": {
+      btn.insertAdjacentHTML("beforebegin", titleRowHTML(""));
+      const inputs = $$(".title-opt", btn.parentElement); if (inputs.length) inputs[inputs.length - 1].focus();
+      return;
+    }
+    case "title-rm":
+      btn.closest(".title-row").remove(); headerPatch.titles = collectTitles(); scheduleHeaderSave(); return;
   }
 
   // script-row actions
