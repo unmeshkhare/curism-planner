@@ -179,6 +179,11 @@ tr.first-done td{border-top:1px solid rgba(109,255,176,.35)}
 .script-table th:nth-child(2){width:27%}
 .script-table th:nth-child(3){width:40%}
 .script-table th:nth-child(5){width:78px}
+.mod-table th:nth-child(2){width:52%}
+.mod-table th:nth-child(3){width:auto}
+.mod-table th:nth-child(4){width:78px}
+.card:has(.mod-table){margin:18px 0}
+.empty-note{padding:6px 18px 16px;margin:0}
 .c-num{white-space:nowrap}
 .num{display:inline-block;min-width:22px;color:var(--muted);font-size:13px;padding-top:8px}
 .rowtools{display:inline-flex;vertical-align:top;margin-top:4px}
@@ -296,6 +301,8 @@ tr.first-done td{border-top:1px solid rgba(109,255,176,.35)}
   .ps-script th:nth-child(2){width:26%}
   .ps-script th:nth-child(3){width:41%}
   .ps-script th:nth-child(4){width:26%}
+  .ps-mod th:nth-child(2){width:55%}
+  .ps-mod th:nth-child(3){width:38%}
   .ps-script .lk{margin-bottom:5px;white-space:normal}
   .ps-script .u{display:block;font-size:7.5pt;color:#777;word-break:break-all}
   .ps-foot{margin:22px 0 0;text-align:center;font-size:8pt;letter-spacing:.25em;text-transform:uppercase;color:#999}

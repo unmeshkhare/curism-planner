@@ -512,6 +512,10 @@ let headerPatch = {}, hdrTimer = null;
 
 const newRow = () => ({ id: newId("r"), line: "", anim: "", links: [] });
 const cleanRow = r => ({ id: r.id, line: r.line || "", anim: r.anim || "", links: (r.links || []).map(l => ({ url: l.url, label: l.label || "" })) });
+// modellers' notes: a second list on the same page (note + links)
+let mrows = null;
+const newMRow = () => ({ id: newId("m"), note: "", links: [] });
+const cleanMRow = r => ({ id: r.id, note: r.note || "", links: (r.links || []).map(l => ({ url: l.url, label: l.label || "" })) });
 const openTopic = () => state.topics.find(t => t.id === openTopicId);
 function setSave(text, cls = "") { const el = $("#saveState"); if (el) { el.textContent = text; el.className = "save-state " + cls; } }
 
@@ -552,7 +556,7 @@ function renderTopic(id) {
     return;
   }
   current = { page: "topic", id }; openTopicId = id;
-  rows = null; rowsDirty = false; headerPatch = {};
+  rows = null; mrows = null; rowsDirty = false; headerPatch = {};
   const ed = canEdit();
   root.innerHTML = `<div class="wrap">
     <header class="top">
@@ -577,6 +581,15 @@ function renderTopic(id) {
     </section>
     <section class="card details">${FIELDS.map(f => `<div class="d-label">${f.label}</div><div class="d-val">${fieldInput(f)}</div>`).join("")}</section>
     <section class="card">
+      <div class="script-head"><h2>MODELLERS’ NOTES</h2><span class="muted" id="mrowCount"></span></div>
+      <table class="script-table mod-table">
+        <thead><tr><th>#</th><th>Note</th><th>Links</th>${ed ? "<th></th>" : ""}</tr></thead>
+        <tbody id="mrows"></tbody>
+      </table>
+      <p class="muted empty-note" id="mEmpty" hidden>No notes for the modellers yet.</p>
+      ${ed ? `<div class="script-foot"><button class="btn" data-act="add-mrow-end">+ Add row</button></div>` : ""}
+    </section>
+    <section class="card">
       <div class="script-head"><h2>SCRIPT</h2><span class="muted" id="rowCount"></span>
         <button class="btn small" data-act="copy-voice" title="Copy all script lines as one paragraph">Copy as paragraph</button></div>
       <table class="script-table">
@@ -598,10 +611,11 @@ function renderTopic(id) {
   scriptUnsub = onSnapshot(doc(db, "scripts", id), snap => {
     if (openTopicId !== id || snap.metadata.hasPendingWrites) return;
     const remote = snap.exists() ? (snap.data().rows || []) : [];
-    if (rows === null) { rows = remote.length ? remote : [newRow()]; renderRows(); return; }
-    if (rowsDirty || (canEdit() && document.activeElement && document.activeElement.closest("#rows"))) return;
-    if (JSON.stringify(remote) === JSON.stringify(rows)) return;
-    rows = remote.length ? remote : [newRow()]; renderRows();
+    const remoteM = snap.exists() ? (snap.data().mrows || []) : [];
+    if (rows === null) { rows = remote.length ? remote : [newRow()]; mrows = remoteM; renderRows(); renderMRows(); return; }
+    if (rowsDirty || (canEdit() && document.activeElement && document.activeElement.closest("#rows,#mrows"))) return;
+    if (JSON.stringify(remote) === JSON.stringify(rows) && JSON.stringify(remoteM) === JSON.stringify(mrows)) return;
+    rows = remote.length ? remote : [newRow()]; mrows = remoteM; renderRows(); renderMRows();
   }, dataError);
 }
 
@@ -648,8 +662,8 @@ async function flushRows() {
   clearTimeout(rowsTimer);
   const id = openTopicId;
   if (!id || !rowsDirty || !rows) return;
-  const data = rows.map(cleanRow); rowsDirty = false;
-  try { await setDoc(doc(db, "scripts", id), { rows: data, updatedAt: Date.now() }); if (openTopicId === id && !rowsDirty) setSave("Saved ✓", "ok"); }
+  const data = rows.map(cleanRow), mdata = (mrows || []).map(cleanMRow); rowsDirty = false;
+  try { await setDoc(doc(db, "scripts", id), { rows: data, mrows: mdata, updatedAt: Date.now() }); if (openTopicId === id && !rowsDirty) setSave("Saved ✓", "ok"); }
   catch (e) {
     if (openTopicId === id) { rowsDirty = true; setSave("Save failed - retrying", "err"); rowsTimer = setTimeout(flushRows, 4000); }
     dataError(e);
@@ -707,6 +721,14 @@ async function exportPdf() {
     ? `<h2 class="ps-h2">Voiceover text</h2><p class="ps-voice">${esc(vt)}</p><p class="ps-voicestat">${esc(voiceStatsText(vt))}</p>`
     : "";
 
+  const mUsed = (mrows || []).filter(r => (r.note || "").trim() || (r.links || []).length);
+  const modHTML = mUsed.length ? `<h2 class="ps-h2">Modellers’ notes</h2>
+    <table class="ps-script ps-mod">
+      <thead><tr><th class="n">#</th><th>Note</th><th>Links</th></tr></thead>
+      <tbody>${mUsed.map((r, i) => `<tr><td class="n">${i + 1}</td><td>${esc(r.note)}</td>
+        <td>${(r.links || []).map(l => { const u = safeUrl(l.url); return u ? `<div class="lk"><a href="${esc(u)}">${esc(l.label || defaultLabel(u))}</a><span class="u">${esc(u)}</span></div>` : ""; }).join("")}</td></tr>`).join("")}</tbody>
+    </table>` : "";
+
   const old = $("#printSheet"); if (old) old.remove();
   const sheet = document.createElement("div");
   sheet.id = "printSheet";
@@ -715,6 +737,7 @@ async function exportPdf() {
     <h1 class="ps-title">${esc(t.name || "Untitled")}</h1>
     <table class="ps-details"><tbody>${detailRows}</tbody></table>
     ${voiceHTML}
+    ${modHTML}
     <h2 class="ps-h2">Script</h2>
     <table class="ps-script">
       <thead><tr><th class="n">#</th><th>Script line</th><th>Animation description</th><th>Reference links</th></tr></thead>
@@ -758,6 +781,34 @@ function rowRowHTML(r, i) {
     ${ed ? `<td class="c-act"><button class="icon-btn" data-act="row-add" title="Insert row below" aria-label="Insert row below">＋</button><button class="icon-btn danger" data-act="row-del" title="Delete row" aria-label="Delete row">✕</button></td>` : ""}
   </tr>`;
 }
+function linksCellHTML(r, ed) {
+  return `<div class="links">${(r.links || []).map(chipHTML).join("")}</div>
+      ${ed ? `<div class="linkform" hidden>
+        <input class="inp lf-url" type="text" inputmode="url" placeholder="Paste link (image, video, YouTube…)">
+        <input class="inp lf-label" type="text" placeholder="Label (optional)">
+        <div class="lf-actions"><button class="btn small primary" data-act="link-save">Add</button><button class="btn small ghost" data-act="link-cancel">Cancel</button></div>
+      </div>
+      <button class="btn small ghost" data-act="link-add">+ link</button>` : ""}`;
+}
+function mrowHTML(r, i) {
+  const ed = canEdit(), ro = ed ? "" : " readonly";
+  return `<tr data-rid="${esc(r.id)}" data-list="m">
+    <td class="c-num" data-label=""><span class="num">${i + 1}</span>${ed ? `<span class="rowtools">
+      <button class="icon-btn" data-act="row-up" ${i === 0 ? "disabled" : ""} title="Move up" aria-label="Move row up">↑</button>
+      <button class="icon-btn" data-act="row-down" ${i === mrows.length - 1 ? "disabled" : ""} title="Move down" aria-label="Move row down">↓</button></span>` : ""}</td>
+    <td data-label="Note"><textarea class="inp area" data-f="note" rows="2"${ro}${ed ? ' placeholder="Note for the modeller…"' : ""}>\n${esc(r.note)}</textarea></td>
+    <td data-label="Links">${linksCellHTML(r, ed)}</td>
+    ${ed ? `<td class="c-act"><button class="icon-btn" data-act="row-add" title="Insert row below" aria-label="Insert row below">＋</button><button class="icon-btn danger" data-act="row-del" title="Delete row" aria-label="Delete row">✕</button></td>` : ""}
+  </tr>`;
+}
+function renderMRows() {
+  const tb = $("#mrows"); if (!tb || !mrows) return;
+  tb.innerHTML = mrows.map(mrowHTML).join("");
+  $$("#mrows textarea").forEach(autosize);
+  const rc = $("#mrowCount"); if (rc) rc.textContent = `${mrows.length} row${mrows.length === 1 ? "" : "s"}`;
+  const tbl = tb.closest("table"); if (tbl) tbl.hidden = !mrows.length;
+  const em = $("#mEmpty"); if (em) em.hidden = !!mrows.length || canEdit();
+}
 function renderRows() {
   const tb = $("#rows"); if (!tb || !rows) return;
   tb.innerHTML = rows.map(rowRowHTML).join("");
@@ -795,8 +846,9 @@ async function copyVoice(btn) {
 }
 function rowOf(el) {
   const tr = el.closest("tr[data-rid]"); if (!tr) return {};
-  const i = rows.findIndex(r => r.id === tr.dataset.rid);
-  return { tr, i, row: rows[i] };
+  const m = tr.dataset.list === "m", list = (m ? mrows : rows) || [];
+  const i = list.findIndex(r => r.id === tr.dataset.rid);
+  return { tr, i, row: list[i], list, m };
 }
 function focusRow(i) { const tr = $$("#rows tr")[i]; if (tr) { const ta = $("textarea", tr); if (ta) ta.focus(); } }
 
@@ -816,8 +868,8 @@ root.addEventListener("input", e => {
     if (el.type === "text" && el.closest(".urlrow")) updateOpen(el);
     scheduleHeaderSave();
   } else if (el.dataset.f && rows) {
-    const { row } = rowOf(el); if (!row) return;
-    row[el.dataset.f] = el.value; autosize(el); markRows(); updateVoice();
+    const { row, m } = rowOf(el); if (!row) return;
+    row[el.dataset.f] = el.value; autosize(el); markRows(); if (!m) updateVoice();
   }
 });
 
@@ -853,7 +905,7 @@ root.addEventListener("keydown", e => {
   }
 });
 
-const EDIT_ACTS = new Set(["new", "cats", "mv-up", "mv-down", "del-topic", "delete-topic", "add-row-end",
+const EDIT_ACTS = new Set(["new", "cats", "mv-up", "mv-down", "del-topic", "delete-topic", "add-row-end", "add-mrow-end",
   "row-up", "row-down", "row-add", "row-del", "link-add", "link-cancel", "link-save", "link-rm", "title-add", "title-rm"]);
 
 root.addEventListener("click", async e => {
@@ -895,6 +947,11 @@ root.addEventListener("click", async e => {
     case "copy-voice": await copyVoice(btn); return;
     case "add-row-end":
       rows.push(newRow()); renderRows(); focusRow(rows.length - 1); markRows(); return;
+    case "add-mrow-end": {
+      mrows.push(newMRow()); renderMRows(); markRows();
+      const tas = $$("#mrows textarea"); if (tas.length) tas[tas.length - 1].focus();
+      return;
+    }
     case "title-add": {
       btn.insertAdjacentHTML("beforebegin", titleRowHTML(""));
       const inputs = $$(".title-opt", btn.parentElement); if (inputs.length) inputs[inputs.length - 1].focus();
@@ -906,15 +963,19 @@ root.addEventListener("click", async e => {
 
   // script-row actions
   if (!rows) return;
-  const { tr, i, row } = rowOf(btn); if (!row) return;
+  const { tr, i, row, list, m } = rowOf(btn); if (!row) return;
+  const redraw = () => { if (m) renderMRows(); else renderRows(); };
   switch (act) {
-    case "row-up": if (i > 0) { [rows[i - 1], rows[i]] = [rows[i], rows[i - 1]]; renderRows(); markRows(); } break;
-    case "row-down": if (i < rows.length - 1) { [rows[i + 1], rows[i]] = [rows[i], rows[i + 1]]; renderRows(); markRows(); } break;
-    case "row-add": rows.splice(i + 1, 0, newRow()); renderRows(); focusRow(i + 1); markRows(); break;
+    case "row-up": if (i > 0) { [list[i - 1], list[i]] = [list[i], list[i - 1]]; redraw(); markRows(); } break;
+    case "row-down": if (i < list.length - 1) { [list[i + 1], list[i]] = [list[i], list[i + 1]]; redraw(); markRows(); } break;
+    case "row-add":
+      list.splice(i + 1, 0, m ? newMRow() : newRow()); redraw();
+      if (m) { const tas = $$("#mrows textarea"); if (tas[i + 1]) tas[i + 1].focus(); } else focusRow(i + 1);
+      markRows(); break;
     case "row-del": {
-      const empty = !row.line && !row.anim && !(row.links || []).length;
+      const empty = !(row.line || row.anim || row.note) && !(row.links || []).length;
       if (empty || btn.dataset.armed) {
-        rows.splice(i, 1); if (!rows.length) rows.push(newRow()); renderRows(); markRows();
+        list.splice(i, 1); if (!list.length && !m) list.push(newRow()); redraw(); markRows();
       } else {
         btn.dataset.armed = "1"; btn.textContent = "Sure?"; btn.classList.add("armed");
         setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = "✕"; btn.classList.remove("armed"); } }, 2500);
@@ -931,10 +992,10 @@ root.addEventListener("click", async e => {
       const f = $(".linkform", tr), urlEl = $(".lf-url", f), url = safeUrl(urlEl.value);
       if (!url) { urlEl.classList.add("bad"); urlEl.focus(); break; }
       row.links = [...(row.links || []), { url, label: $(".lf-label", f).value.trim() }];
-      renderRows(); markRows(); break;
+      redraw(); markRows(); break;
     }
     case "link-rm": {
-      row.links.splice(Number(btn.dataset.i), 1); renderRows(); markRows(); break;
+      row.links.splice(Number(btn.dataset.i), 1); redraw(); markRows(); break;
     }
   }
 });
