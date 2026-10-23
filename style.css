@@ -391,3 +391,15 @@ body.theme-g .btn.primary{color:#04201b}
   #printSheet.g .ps-head{border-bottom-color:#29cdb5}
   #printSheet.g .ps-head img.ps-g{width:auto;height:8mm}
 }
+
+/* ---------- checklists inside Graviton note rows ---------- */
+.checks{display:flex;flex-direction:column;gap:6px;margin:8px 0 6px}
+.chk-item{display:flex;align-items:center;gap:8px}
+.chk-box{appearance:none;-webkit-appearance:none;flex:none;width:19px;height:19px;margin:0;cursor:pointer;border:1px solid var(--line-2);border-radius:5px;background:transparent;display:grid;place-content:center;transition:border-color .3s,background .3s}
+.chk-box:hover{border-color:var(--accent)}
+.chk-box:checked{background:var(--accent);border-color:var(--accent)}
+.chk-box:checked::after{content:"";width:5px;height:9px;border:solid #04201b;border-width:0 2px 2px 0;transform:rotate(45deg) translate(-1px,-1px)}
+.chk-text{flex:1;min-width:0;padding:6px 10px;font-size:14px;border-color:var(--line)}
+.chk-item.done .chk-text{text-decoration:line-through;color:var(--muted)}
+.chk-count{font-size:12px;margin-left:10px}
+@media print{ .ps-checks{list-style:none;margin:5px 0 0;padding:0} .ps-checks li{margin:0 0 2px} }

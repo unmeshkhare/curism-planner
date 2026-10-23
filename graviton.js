@@ -252,7 +252,12 @@ export function createGraviton(c) {
   let patch = {}, hdrTimer = null;
   const openProject = () => S.projects.find(p => p.id === openId);
   const newRow = () => ({ id: newId("n"), note: "", links: [] });
-  const cleanRow = r => ({ id: r.id, note: r.note || "", links: (r.links || []).map(l => ({ url: l.url, label: l.label || "" })) });
+  const cleanRow = r => ({
+    id: r.id, note: r.note || "",
+    checks: (r.checks || []).map(k => ({ id: k.id, text: k.text || "", done: !!k.done })),
+    links: (r.links || []).map(l => ({ url: l.url, label: l.label || "" }))
+  });
+  const newCheck = () => ({ id: newId("k"), text: "", done: false });
   const setSave = (text, cls = "") => { const el = $("#gSave"); if (el) { el.textContent = text; el.className = "save-state " + cls; } };
 
   const FIELDS = [
@@ -391,13 +396,20 @@ export function createGraviton(c) {
     const u = safeUrl(l.url);
     return `<span class="chip ${linkKind(u)}"><a href="${esc(u || "#")}" target="_blank" rel="noopener noreferrer" title="${esc(u)}">${esc(l.label || defaultLabel(u))}</a><button class="x" data-act="g-link-rm" data-i="${k}" title="Remove link" aria-label="Remove link">×</button></span>`;
   }
+  const checkCount = r => { const n = (r.checks || []).length; return n ? `${(r.checks || []).filter(k => k.done).length}/${n} done` : ""; };
+  const checkHTML = k => `<div class="chk-item${k.done ? " done" : ""}" data-kid="${esc(k.id)}">
+      <input type="checkbox" class="chk-box" data-gc="done" aria-label="Done"${k.done ? " checked" : ""}>
+      <input class="inp chk-text" type="text" data-gc="text" value="${esc(k.text)}" placeholder="Checklist item…" aria-label="Checklist item">
+      <button class="icon-btn danger" data-act="g-chk-rm" title="Remove checkbox" aria-label="Remove checkbox">✕</button></div>`;
   function rowHTML2(sec, r, i, n) {
     const s = SECTIONS.find(x => x.key === sec);
     return `<tr data-gr="${esc(r.id)}" data-sec="${sec}">
       <td class="c-num" data-label=""><span class="num">${i + 1}</span><span class="rowtools">
         <button class="icon-btn" data-act="g-row-up" ${i === 0 ? "disabled" : ""} title="Move up" aria-label="Move row up">↑</button>
         <button class="icon-btn" data-act="g-row-down" ${i === n - 1 ? "disabled" : ""} title="Move down" aria-label="Move row down">↓</button></span></td>
-      <td data-label="Note"><textarea class="inp area" data-gn="note" rows="2" placeholder="${esc(s.ph)}">\n${esc(r.note)}</textarea></td>
+      <td data-label="Note"><textarea class="inp area" data-gn="note" rows="2" placeholder="${esc(s.ph)}">\n${esc(r.note)}</textarea>
+        <div class="checks">${(r.checks || []).map(checkHTML).join("")}</div>
+        <button class="btn small ghost" data-act="g-chk-add">+ checkbox</button><span class="chk-count muted">${checkCount(r)}</span></td>
       <td data-label="Links">
         <div class="links">${(r.links || []).map(chipHTML).join("")}</div>
         <div class="linkform" hidden>
@@ -433,11 +445,11 @@ export function createGraviton(c) {
       ["Project start date", fmtDate(p.startDate)], ["Deadline", fmtDate(p.deadline)], ["Assigned to", p.assigned], ["Description", p.description]]
       .filter(([, v]) => String(v || "").trim()).map(([l, v]) => `<tr><th>${esc(l)}</th><td>${esc(v)}</td></tr>`).join("");
     const secHTML = SECTIONS.map(s => {
-      const used = notes[s.key].filter(r => (r.note || "").trim() || (r.links || []).length);
+      const used = notes[s.key].filter(r => (r.note || "").trim() || (r.links || []).length || (r.checks || []).length);
       if (!used.length) return "";
       return `<h2 class="ps-h2">${esc(s.title.charAt(0) + s.title.slice(1).toLowerCase())}</h2>
         <table class="ps-script ps-mod"><thead><tr><th class="n">#</th><th>Note</th><th>Links</th></tr></thead><tbody>
-        ${used.map((r, i) => `<tr><td class="n">${i + 1}</td><td>${esc(r.note)}</td><td>${(r.links || []).map(l => { const u = safeUrl(l.url); return u ? `<div class="lk"><a href="${esc(u)}">${esc(l.label || defaultLabel(u))}</a><span class="u">${esc(u)}</span></div>` : ""; }).join("")}</td></tr>`).join("")}
+        ${used.map((r, i) => `<tr><td class="n">${i + 1}</td><td>${esc(r.note)}${(r.checks || []).length ? `<ul class="ps-checks">${r.checks.map(k => `<li>${k.done ? "☑" : "☐"} ${esc(k.text)}</li>`).join("")}</ul>` : ""}</td><td>${(r.links || []).map(l => { const u = safeUrl(l.url); return u ? `<div class="lk"><a href="${esc(u)}">${esc(l.label || defaultLabel(u))}</a><span class="u">${esc(u)}</span></div>` : ""; }).join("")}</td></tr>`).join("")}
         </tbody></table>`;
     }).join("");
     const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
@@ -476,12 +488,23 @@ export function createGraviton(c) {
     } else if (el.dataset.gn) {
       const { row, sec } = rowCtx(el); if (!row) return;
       row[el.dataset.gn] = el.value; autosize(el); markNotes(sec);
+    } else if (el.dataset.gc === "text") {
+      const { row, sec } = rowCtx(el); if (!row) return;
+      const k = (row.checks || []).find(x => x.id === el.closest(".chk-item").dataset.kid); if (!k) return;
+      k.text = el.value; markNotes(sec);
     }
   });
   root.addEventListener("change", async e => {
     if (!onPage()) return;
     const el = e.target, act = el.dataset.act;
     try {
+      if (el.dataset.gc === "done") {
+        const { row, sec, tr } = rowCtx(el); if (!row) return;
+        const item = el.closest(".chk-item"), k = (row.checks || []).find(x => x.id === item.dataset.kid); if (!k) return;
+        k.done = el.checked; item.classList.toggle("done", k.done);
+        const cc = $(".chk-count", tr); if (cc) cc.textContent = checkCount(row);
+        markNotes(sec); return;
+      }
       if (el.dataset.gf === "type" || el.dataset.gf === "priority") {
         if (!canEdit()) return;
         patch[el.dataset.gf] = el.value; scheduleHeader(); return;
@@ -502,6 +525,9 @@ export function createGraviton(c) {
   });
   root.addEventListener("keydown", e => {
     const t = e.target;
+    if (onPage() && t.matches && t.matches(".chk-text") && e.key === "Enter") {
+      e.preventDefault(); $("[data-act=g-chk-add]", t.closest("tr")).click(); return;
+    }
     if (onPage() && t.matches && t.matches(".glf-url,.glf-label")) {
       const f = t.closest(".linkform");
       if (e.key === "Enter") { e.preventDefault(); $("[data-act=g-link-save]", f).click(); }
@@ -550,12 +576,21 @@ export function createGraviton(c) {
         break;
       }
       case "g-row-del":
-        if ((!row.note && !(row.links || []).length) || btn.dataset.armed) { list.splice(i, 1); redraw(); markNotes(sec); }
+        if ((!row.note && !(row.links || []).length && !(row.checks || []).length) || btn.dataset.armed) { list.splice(i, 1); redraw(); markNotes(sec); }
         else {
           btn.dataset.armed = "1"; btn.textContent = "Sure?"; btn.classList.add("armed");
           setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = "✕"; btn.classList.remove("armed"); } }, 2500);
         }
         break;
+      case "g-chk-add": {
+        (row.checks = row.checks || []).push(newCheck()); redraw(); markNotes(sec);
+        const items = $$(".chk-text", $(`[data-body="${sec}"] tr[data-gr="${row.id}"]`)); if (items.length) items[items.length - 1].focus();
+        break;
+      }
+      case "g-chk-rm": {
+        const kid = btn.closest(".chk-item").dataset.kid;
+        row.checks = (row.checks || []).filter(x => x.id !== kid); redraw(); markNotes(sec); break;
+      }
       case "g-link-add": { const f = $(".linkform", tr); f.hidden = false; btn.hidden = true; $(".glf-url", f).focus(); break; }
       case "g-link-cancel": { $(".linkform", tr).hidden = true; $("[data-act=g-link-add]", tr).hidden = false; break; }
       case "g-link-save": {
