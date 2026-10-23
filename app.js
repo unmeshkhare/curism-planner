@@ -11,6 +11,7 @@ import {
   getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, writeBatch
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import * as cfg from "./firebase-config.js";
+import { createGraviton } from "./graviton.js";
 
 const firebaseConfig = cfg.firebaseConfig;
 const SHARED_EMAIL = String(cfg.SHARED_EMAIL || "").toLowerCase();                       // admin (edit) account
@@ -110,6 +111,17 @@ if (configured) {
 const canEdit = () => !!(auth && auth.currentUser && String(auth.currentUser.email || "").toLowerCase() === SHARED_EMAIL);
 const ROLE_KEY = "curism.role";
 const catName = t => (state.cats.find(c => c.id === catIdOf(t)) || {}).name || "Uncategorized";
+let lockWs = null;                                   // workspace chosen on the sign-in screen: "c" (Curism) or "g" (Graviton)
+
+// Graviton workspace lives in graviton.js and shares this page, login and helpers.
+const G = createGraviton({
+  root, $, $$, esc, store, newId, autosize, safeUrl, linkKind, defaultLabel, toast, modal,
+  canEdit: () => canEdit(), dataError: e => dataError(e), db: () => db,
+  setPage: p => { current = p; }, page: () => current,
+  changed: () => onGChange(), authMsg: e => authMsg(e),
+  reauth: pw => reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(SHARED_EMAIL, pw))
+});
+function onGChange() { if (current.page === "loading") route(); else G.onData(); }
 
 function authMsg(e) {
   const c = e && e.code;
@@ -121,7 +133,26 @@ function authMsg(e) {
   return "Could not sign in (" + (c || "error") + ").";
 }
 
-// ---------- lock screen ----------
+// ---------- start + lock screens ----------
+function renderStart(signedIn) {
+  current = { page: "start" };
+  document.body.classList.remove("theme-g");
+  root.innerHTML = `<div class="lock"><div class="start">
+    <p class="tagline">Choose a workspace</p>
+    <div class="tiles">
+      <button class="tile" data-ws="c" aria-label="Open Curism">
+        <img class="logo big" src="logo.png" alt=""><img class="wordmark big" src="wordmark.png" alt="Curism"><span class="tagline">Shorts planner</span></button>
+      <button class="tile g" data-ws="g" aria-label="Open Graviton">
+        <img class="gword big" src="graviton.png" alt="Graviton"><span class="tagline">Project desk</span></button>
+    </div>
+    ${signedIn ? `<button class="btn ghost" data-act="lock">Lock</button>` : ""}
+  </div></div>`;
+  $$("[data-ws]").forEach(b => b.addEventListener("click", () => {
+    if (signedIn) { location.hash = b.dataset.ws === "g" ? "#/g" : "#/c"; return; }
+    lockWs = b.dataset.ws; renderLock();
+  }));
+}
+
 function renderLock(msg = "") {
   current = { page: "lock" };
   if (!configured) {
@@ -133,11 +164,13 @@ function renderLock(msg = "") {
     </div></div>`;
     return;
   }
+  if (!lockWs) { renderStart(false); return; }
+  const isG = lockWs === "g";
+  document.body.classList.toggle("theme-g", isG);
   let role = store.get(ROLE_KEY, "viewer") === "admin" ? "admin" : "viewer";
   root.innerHTML = `<div class="lock"><form class="lock-card" id="lockForm">
-    <img class="logo big" src="logo.png" alt="Curism">
-    <img class="wordmark big" src="wordmark.png" alt="curism">
-    <p class="tagline">Shorts planner</p>
+    ${isG ? `<img class="gword big" src="graviton.png" alt="Graviton">` : `<img class="logo big" src="logo.png" alt="Curism"><img class="wordmark big" src="wordmark.png" alt="curism">`}
+    <p class="tagline">${isG ? "Project desk" : "Shorts planner"}</p>
     <div class="seg role-seg" role="group" aria-label="Access level">
       <button type="button" data-role="viewer" class="${role === "viewer" ? "on" : ""}">View</button>
       <button type="button" data-role="admin" class="${role === "admin" ? "on" : ""}">Edit</button>
@@ -145,7 +178,9 @@ function renderLock(msg = "") {
     <input class="inp" id="pw" type="password" autocomplete="current-password" placeholder="password" aria-label="Password" autofocus>
     <button class="btn primary wide" type="submit">Enter</button>
     <p class="err" id="lockErr">${esc(msg)}</p>
+    <button type="button" class="btn ghost small" id="lockBack">← Change workspace</button>
   </form></div>`;
+  $("#lockBack").addEventListener("click", () => { lockWs = null; renderStart(false); });
   $$("[data-role]").forEach(b => b.addEventListener("click", () => {
     role = b.dataset.role; store.set(ROLE_KEY, role);
     $$("[data-role]").forEach(x => x.classList.toggle("on", x === b));
@@ -155,8 +190,11 @@ function renderLock(msg = "") {
     e.preventDefault();
     const pw = $("#pw").value; if (!pw) return;
     const btn = $("#lockForm button[type=submit]"); btn.disabled = true;
-    try { await signInWithEmailAndPassword(auth, role === "admin" ? SHARED_EMAIL : VIEWER_EMAIL, pw); }
-    catch (err) {
+    try {
+      await signInWithEmailAndPassword(auth, role === "admin" ? SHARED_EMAIL : VIEWER_EMAIL, pw);
+      const h = location.hash;                       // keep a bookmarked deep link into the same workspace
+      if (!(isG ? /^#\/g(\/|$)/.test(h) : /^#\/(topic\/|c$)/.test(h))) location.hash = isG ? "#/g" : "#/c";
+    } catch (err) {
       btn.disabled = false;
       const m = authMsg(err);
       $("#lockErr").textContent = m === "Wrong password." ? `Wrong password for ${role === "admin" ? "edit" : "view"} access.` : m;
@@ -169,6 +207,7 @@ function renderLock(msg = "") {
 function startData() {
   stopData();
   state.topicsLoaded = false; state.catsLoaded = false;
+  G.start();
   unsubs.push(onSnapshot(collection(db, "topics"), snap => {
     state.topics = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     state.topicsLoaded = true; onData();
@@ -182,7 +221,7 @@ function startData() {
   }, dataError));
   route();
 }
-function stopData() { unsubs.forEach(u => u()); unsubs = []; }
+function stopData() { unsubs.forEach(u => u()); unsubs = []; G.stop(); }
 function dataError(err) {
   console.error(err);
   toast(err && err.code === "permission-denied"
@@ -206,7 +245,7 @@ function onData() {
   if (current.page === "home") { refreshFilters(); renderList(); }
   else if (current.page === "topic") {
     const t = openTopic();
-    if (!t) { discardPending(); location.hash = "#/"; toast("That topic no longer exists."); }
+    if (!t) { discardPending(); location.hash = "#/c"; toast("That topic no longer exists."); }
     else fillHeader(t);
   }
   if (catModal && !(document.activeElement && document.activeElement.matches("input") && catModal.contains(document.activeElement))) renderCatList();
@@ -214,21 +253,32 @@ function onData() {
 
 // ---------- routing ----------
 function route() {
-  document.body.classList.toggle("ro", !!(auth && auth.currentUser) && !canEdit());
-  if (!auth || !auth.currentUser) { renderLock(); return; }
-  leaveTopic();
-  if (!(state.topicsLoaded && state.catsLoaded)) {
+  const signedIn = !!(auth && auth.currentUser);
+  document.body.classList.toggle("ro", signedIn && !canEdit());
+  const h = location.hash || "#/";
+  const isG = /^#\/g(\/|$)/.test(h);
+  document.body.classList.toggle("theme-g", isG || (!signedIn && lockWs === "g"));
+  if (!signedIn) { renderLock(); return; }
+  leaveTopic(); G.leave();
+  const loading = g => {
     current = { page: "loading" };
-    root.innerHTML = `<div class="loading"><img class="logo big" src="logo.png" alt=""><p class="muted">Loading…</p></div>`;
+    root.innerHTML = `<div class="loading">${g ? `<img class="gword big" src="graviton.png" alt="">` : `<img class="logo big" src="logo.png" alt="">`}<p class="muted">Loading…</p></div>`;
+  };
+  if (isG) {
+    if (!G.isLoaded()) { loading(true); return; }
+    const gm = h.match(/^#\/g\/project\/([^/?]+)/);
+    if (gm) G.renderProject(decodeURIComponent(gm[1])); else G.renderHome();
     return;
   }
-  const m = (location.hash || "#/").match(/^#\/topic\/([^/?]+)/);
+  const m = h.match(/^#\/topic\/([^/?]+)/);
+  if (!m && h !== "#/c") { renderStart(true); return; }
+  if (!(state.topicsLoaded && state.catsLoaded)) { loading(false); return; }
   if (m) renderTopic(decodeURIComponent(m[1])); else renderHome();
 }
 window.addEventListener("hashchange", route);
 
 if (configured) {
-  onAuthStateChanged(auth, user => { if (user) startData(); else { stopData(); renderLock(); } });
+  onAuthStateChanged(auth, user => { if (user) startData(); else { stopData(); lockWs = null; renderLock(); } });
 } else renderLock();
 
 // ============================================================
@@ -242,6 +292,7 @@ function renderHome() {
       <div class="top-actions">
         ${canEdit() ? `<button class="btn primary" data-act="new">+ New topic</button>
         <button class="btn" data-act="cats">Categories</button>` : `<span class="badge" title="You can view, copy, open links and export, but not change anything">View only</span>`}
+        <a class="btn ghost" href="#/" title="Switch between Curism and Graviton">Switch</a>
         <button class="btn ghost" data-act="lock">Lock</button>
       </div>
     </header>
@@ -445,7 +496,7 @@ function openDeleteModal(t) {
       await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(SHARED_EMAIL, dp.value));
     } catch (e) { err.textContent = authMsg(e); go.disabled = false; return; }
     try {
-      if (current.page === "topic" && current.id === t.id) { discardPending(); location.hash = "#/"; }
+      if (current.page === "topic" && current.id === t.id) { discardPending(); location.hash = "#/c"; }
       const b = writeBatch(db);
       b.delete(doc(db, "topics", t.id));
       b.delete(doc(db, "scripts", t.id));
@@ -552,7 +603,7 @@ function renderTopic(id) {
   const t = state.topics.find(x => x.id === id);
   if (!t) {
     current = { page: "missing" };
-    root.innerHTML = `<div class="wrap"><div class="empty"><p>That topic was not found.</p><a class="btn" href="#/">← All topics</a></div></div>`;
+    root.innerHTML = `<div class="wrap"><div class="empty"><p>That topic was not found.</p><a class="btn" href="#/c">← All topics</a></div></div>`;
     return;
   }
   current = { page: "topic", id }; openTopicId = id;
@@ -560,11 +611,12 @@ function renderTopic(id) {
   const ed = canEdit();
   root.innerHTML = `<div class="wrap">
     <header class="top">
-      <a class="btn ghost" href="#/">← All topics</a>
+      <a class="btn ghost" href="#/c">← All topics</a>
       <div class="top-actions">
         ${ed ? `<span class="save-state" id="saveState"></span>` : `<span class="badge" title="You can view, copy, open links and export, but not change anything">View only</span>`}
         <button class="btn" data-act="export-pdf">Export PDF</button>
         ${ed ? `<button class="btn danger" data-act="delete-topic">Delete</button>` : ""}
+        <a class="btn ghost" href="#/" title="Switch between Curism and Graviton">Switch</a>
         <button class="btn ghost" data-act="lock">Lock</button>
       </div>
     </header>
@@ -922,7 +974,7 @@ root.addEventListener("click", async e => {
   if (!canEdit() && EDIT_ACTS.has(act)) return;                         // view-only users can never edit
 
   switch (act) {
-    case "lock": discardPending(); leaveTopic(); await signOut(auth); return;
+    case "lock": discardPending(); leaveTopic(); G.leave(); await signOut(auth); return;
     case "new": openNewTopic(); return;
     case "cats": openCats(); return;
     case "view":

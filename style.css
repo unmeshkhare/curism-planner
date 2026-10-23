@@ -351,3 +351,43 @@ tr.first-done td{border-top:1px solid rgba(109,255,176,.35)}
   .ps-titles{margin:0;padding-left:16px}
   .ps-titles li{margin:0 0 2px}
 }
+
+/* ---------- workspaces: start screen, Graviton theme ---------- */
+body.theme-g{
+  --accent:#29cdb5; --accent-rgb:41,205,181;
+  --line:rgba(41,205,181,.15); --line-2:rgba(41,205,181,.32);
+  background:
+    radial-gradient(1000px 650px at 8% -12%,rgba(var(--accent-rgb),.10),transparent 60%),
+    radial-gradient(800px 560px at 100% 4%,rgba(60,140,255,.05),transparent 60%),
+    var(--bg);
+  background-attachment:fixed;
+}
+body.theme-g .btn.primary:hover{background:#4fe0cb}
+body.theme-g .btn.primary{color:#04201b}
+.gword{height:30px;width:auto;display:block}
+.gword.big{height:44px;max-width:80%}
+.lock-card .gword.big{margin:10px 0 0}
+.start{width:min(760px,94vw);display:flex;flex-direction:column;align-items:center;gap:26px;text-align:center}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:20px;width:100%}
+.tile{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;min-height:260px;padding:30px 20px;
+  cursor:pointer;border:1px solid var(--line);border-radius:22px;background:var(--panel);color:inherit;
+  box-shadow:0 0 70px rgba(var(--accent-rgb),.05);transition:border-color .4s,box-shadow .4s,transform .4s;
+}
+.tile:hover,.tile:focus-visible{border-color:var(--accent);box-shadow:0 0 50px rgba(var(--accent-rgb),.22);transform:translateY(-3px);outline:none}
+.tile .tagline{margin-top:4px}
+.tile.g{--accent:#29cdb5;--accent-rgb:41,205,181;--line:rgba(41,205,181,.16)}
+.tile.g .tagline{color:#29cdb5}
+.glf-url.bad{border-color:var(--danger)}
+.c-dead{white-space:nowrap;color:var(--text-2);font-size:14px}
+.c-dead.late{color:var(--danger)}
+.gnotes{margin-bottom:18px}
+@media (max-width:760px){
+  .tiles{grid-template-columns:1fr}
+  .tile{min-height:190px}
+  .c-dead{display:inline-block!important;margin-right:8px}
+}
+@media print{
+  #printSheet.g .ps-head{border-bottom-color:#29cdb5}
+  #printSheet.g .ps-head img.ps-g{width:auto;height:8mm}
+}
